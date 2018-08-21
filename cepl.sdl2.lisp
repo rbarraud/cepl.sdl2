@@ -3,7 +3,7 @@
 (defvar *initd* nil)
 
 ;;======================================================================
-;; api v1
+;; api v2
 
 (defgeneric sdl-init (&rest init-flags)
   (:method (&rest init-flags)
@@ -25,7 +25,7 @@
   (sdl2::sdl-quit)
   (setf sdl2::*main-thread-channel* nil)
   (setf sdl2::*lisp-message-event* nil)
-  (let ((init-flags (autowrap:mask-apply 'sdl2::sdl-init-flags :everything)))
+  (let ((init-flags (autowrap:mask 'sdl2::sdl-init-flags :everything)))
     (sdl2::check-rc (sdl2::sdl-init init-flags))))
 
 ;;----------------------------------------------------------------------
@@ -67,7 +67,6 @@
   (defun sdl-step-v1 (surface)
     (declare (ignore surface))
     (%case-events (event)
-      (:quit () (cepl.host:shutdown))
       (otherwise () (loop :for listener :in listeners :do (funcall listener event))))))
 
 ;;----------------------------------------------------------------------
@@ -90,6 +89,7 @@
   (sdl2:gl-set-attr :blue-size blue-size)
   (sdl2:gl-set-attr :buffer-size buffer-size)
   (sdl2:gl-set-attr :doublebuffer (if double-buffer 1 0))
+  (sdl2:gl-set-attr :share-with-current-context 0)
   ;;
   (let ((context (if version
                      (create-context-by-version surface version)
@@ -97,8 +97,31 @@
     (assert context ()
             "CEPL.SDL2: Could not find a suitable context for CEPL.
 Your machine must support at least GL 3.3")
-    (sdl2:gl-make-current surface context)
     context))
+
+(defun make-shared-sdl-context (current-gl-context surface version double-buffer
+                                alpha-size depth-size stencil-size buffer-size
+                                red-size green-size blue-size)
+  (declare (ignorable current-gl-context))
+  (setf cl-opengl-bindings::*gl-get-proc-address* #'sdl2::gl-get-proc-address)
+  (sdl2:gl-set-attr :alpha-size alpha-size)
+  (sdl2:gl-set-attr :depth-size depth-size)
+  (when stencil-size
+    (sdl2:gl-set-attr :stencil-size stencil-size))
+  (sdl2:gl-set-attr :red-size red-size)
+  (sdl2:gl-set-attr :green-size green-size)
+  (sdl2:gl-set-attr :blue-size blue-size)
+  (sdl2:gl-set-attr :buffer-size buffer-size)
+  (sdl2:gl-set-attr :doublebuffer (if double-buffer 1 0))
+  (sdl2:gl-set-attr :share-with-current-context 1)
+  ;;
+  (let ((context (if version
+                     (create-context-by-version surface version)
+                     (search-for-context surface))))
+    (assert context ()
+            "CEPL.SDL2: Could not find a suitable context for CEPL.
+Your machine must support at least GL 3.3")
+    (values context surface)))
 
 (defvar *core-context* t)
 
@@ -118,9 +141,8 @@ Your machine must support at least GL 3.3")
                sdl2-ffi::+sdl-gl-context-profile-core+
                sdl2-ffi::+sdl-gl-context-profile-compatibility+))
         context)
-    (loop :for (major minor core) :in `((4 5 ,p) (4 4 ,p) (4 3 ,p)
-                                        (4 2 ,p) (4 1 ,p) (4 0 ,p)
-                                        (3 3 ,p))
+    (loop :for (major minor core) :in `((4 6 ,p) (4 5 ,p) (4 4 ,p) (4 3 ,p)
+                                        (4 2 ,p) (4 1 ,p) (4 0 ,p) (3 3 ,p))
        :until context
        :do (handler-case
                (progn
@@ -184,7 +206,7 @@ Your machine must support at least GL 3.3")
 
 ;;----------------------------------------------------------------------
 
-(defclass sdl-api (cepl.host:api-1)
+(defclass sdl-api (cepl.host:api-2)
   (;;
    (supports-multiple-contexts-p :initform nil)
    ;;
@@ -218,7 +240,10 @@ Your machine must support at least GL 3.3")
    ;;
    (surface-title-function :initform #'sdl-surface-title)
    ;;
-   (set-surface-title-function :initform #'sdl-set-surface-title)))
+   (set-surface-title-function :initform #'sdl-set-surface-title)
+   ;;
+   (make-gl-context-shared-with-current-context-function
+    :initform #'make-shared-sdl-context)))
 
 (register-host 'sdl-api)
 
